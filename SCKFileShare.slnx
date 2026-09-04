@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="SCKFileShare.vcxproj" Id="b23a7fee-c66e-4c08-a8bc-1aa05b895995" />
+</Solution>
