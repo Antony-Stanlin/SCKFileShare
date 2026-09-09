@@ -1,128 +1,288 @@
 #include "Socket.h"
 
 
-Socket::~Socket() {
-
-	if (tcpSocket != INVALID_SOCKET)
-		closesocket(tcpSocket);
-
-	WSACleanup();
+Socket::Socket(){
 }
 
-void Socket::closeAndCleanup(SOCKET* socket1) {
+Socket::~Socket(){
+    CloseSocket(tcpSocket);
 
-	if (*socket1 != INVALID_SOCKET)
-		closesocket(*socket1);
-
-	WSACleanup();
+    WSACleanup();
 }
 
-void Socket::closeAndCleanup(SOCKET* socket1, SOCKET* socket2) {
+void Socket::CloseSocket(SOCKET& socket){
 
-	if (*socket1 != INVALID_SOCKET)
-		closesocket(*socket1);
+    if (socket != INVALID_SOCKET){
+        closesocket(socket);
 
-	if (*socket2 != INVALID_SOCKET)
-		closesocket(*socket2);
-
-	WSACleanup();
+        socket = INVALID_SOCKET;
+    }
 }
 
-int Socket::checkForError(int result, std::string message) {
+int Socket::InitializeSocket(){
 
-	if (result != 0) {
+    int result = WSAStartup(MAKEWORD(2, 2), &wsa);
 
-		std::cout << message
-			<< result
-			<< "\n";
+    if (result != 0){
+        std::cout << "WinSockAPI failed with error code: "
+            << result
+            << "\n";
 
-		return 1;
-	}
+        return 1;
+    }
 
-	return 0;
+    return 0;
 }
 
-int Socket::checkForError(SOCKET* socket1, std::string message) {
 
-	if (*socket1 == INVALID_SOCKET) {
+int Socket::CreateSocket(){
 
-		std::cout << message
-			<< WSAGetLastError()
-			<< "\n";
+    tcpSocket = socket(
+        AF_INET,
+        SOCK_STREAM,
+        IPPROTO_TCP
+    );
 
-		closeAndCleanup(socket1);
+    if (tcpSocket == INVALID_SOCKET){
 
-		return 1;
-	}
+        std::cout << "Failed to create socket. Error: "
+            << WSAGetLastError()
+            << "\n";
 
-	return 0;
+        return 1;
+    }
+
+
+    return 0;
 }
 
-int Socket::checkForError(SOCKET* socket1, SOCKET* socket2, std::string message) {
+int Socket::PrepareSocket(){
 
-	if (*socket2 == INVALID_SOCKET) {
+    int result = InitializeSocket();
 
-		std::cout << message
-			<< WSAGetLastError()
-			<< "\n";
+    if (result != 0)
+        return result;
 
-		closeAndCleanup(socket1, socket2);
-
-		return 1;
-	}
-
-	return 0;
+    return CreateSocket();
 }
 
-int Socket::checkForError(SOCKET* socket1, int result, std::string message) {
 
-	if (result == SOCKET_ERROR) {
+int Socket::Connect(std::string serverIP){
 
-		std::cout << message
-			<< WSAGetLastError()
-			<< "\n";
+    sockaddr_in serverAddress{};
 
-		closeAndCleanup(socket1);
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(PORT);
 
-		return 1;
-	}
+    int result = inet_pton(
+        AF_INET,
+        serverIP.c_str(),
+        &serverAddress.sin_addr
+    );
 
-	return 0;
+    if (result != 1){
+
+        std::cout << "Invalid IP Address.\n";
+
+        return 1;
+    }
+
+    result = connect(
+        tcpSocket,
+        reinterpret_cast<sockaddr*>(&serverAddress),
+        sizeof(serverAddress)
+    );
+
+    if (result == SOCKET_ERROR){
+
+        std::cout << "Failed to connect server. Error: "
+            << WSAGetLastError()
+            << "\n";
+
+        return 1;
+    }
+
+    return 0;
 }
 
-int Socket::initializeSocket() {
 
-	int result = WSAStartup(
-		MAKEWORD(2, 2),
-		&wsa
-	);
+int Socket::Bind(){
 
-	return checkForError(
-		result,
-		"WinSockAPI failed with error code: "
-	);
+    sockaddr_in serverAddress{};
+
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
+    serverAddress.sin_port = htons(PORT);
+
+
+    int result = bind(
+        tcpSocket,
+        reinterpret_cast<sockaddr*>(&serverAddress),
+        sizeof(serverAddress)
+    );
+
+    if (result == SOCKET_ERROR){
+
+        std::cout << "Bind failed. Error: "
+            << WSAGetLastError()
+            << "\n";
+
+        return 1;
+    }
+    return 0;
 }
 
-int Socket::createSocket() {
+int Socket::Listen(){
 
-	tcpSocket = socket(
-		AF_INET,
-		SOCK_STREAM,
-		IPPROTO_TCP
-	);
+    int result = listen(
+        tcpSocket,
+        SOMAXCONN
+    );
 
-	return checkForError(
-		&tcpSocket,
-		"Failed to create socket. Error: "
-	);
+
+    if (result == SOCKET_ERROR)
+    {
+
+        std::cout
+            << "Listen failed. Error: "
+            << WSAGetLastError()
+            << "\n";
+
+        return 1;
+    }
+
+
+    return 0;
 }
 
-int Socket::prepareSocket() {
 
-	int result = initializeSocket();
+int Socket::Accept(
+    SOCKET& clientSocket)
+{
 
-	if (result == 1)
-		return result;
+    sockaddr_in clientAddress{};
 
-	return createSocket();
+
+    int clientAddressSize =
+        sizeof(clientAddress);
+
+
+    clientSocket = accept(
+        tcpSocket,
+        reinterpret_cast<sockaddr*>(
+            &clientAddress
+            ),
+        &clientAddressSize
+    );
+
+
+    if (clientSocket == INVALID_SOCKET)
+    {
+
+        std::cout
+            << "Accept failed. Error: "
+            << WSAGetLastError()
+            << "\n";
+
+        return 1;
+    }
+
+
+    return 0;
+}
+
+
+bool Socket::SendAll(
+    SOCKET socket,
+    const char* data,
+    int size)
+{
+
+    int totalSent = 0;
+
+
+    while (totalSent < size)
+    {
+
+        int result = send(
+            socket,
+            data + totalSent,
+            size - totalSent,
+            0
+        );
+
+
+        if (result == SOCKET_ERROR)
+        {
+
+            std::cout
+                << "Send failed. Error: "
+                << WSAGetLastError()
+                << "\n";
+
+            return false;
+        }
+
+
+        if (result == 0)
+        {
+            return false;
+        }
+
+
+        totalSent += result;
+    }
+
+
+    return true;
+}
+
+
+bool Socket::ReceiveAll(
+    SOCKET socket,
+    char* data,
+    int size)
+{
+
+    int totalReceived = 0;
+
+
+    while (totalReceived < size)
+    {
+
+        int result = recv(
+            socket,
+            data + totalReceived,
+            size - totalReceived,
+            0
+        );
+
+
+        if (result == SOCKET_ERROR)
+        {
+
+            std::cout
+                << "Receive failed. Error: "
+                << WSAGetLastError()
+                << "\n";
+
+            return false;
+        }
+
+
+        if (result == 0)
+        {
+
+            std::cout
+                << "Connection closed by peer.\n";
+
+            return false;
+        }
+
+
+        totalReceived += result;
+    }
+
+
+    return true;
 }

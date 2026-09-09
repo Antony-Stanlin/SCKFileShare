@@ -1,46 +1,59 @@
 #pragma once
 
-#include "Socket.h"
+#include "FileTransfer.h"
+#include "File.h"
+#include "Thread.h"
 
-#include <fstream>
-#include <vector>
-#include <mutex>
-#include <condition_variable>
-#include <thread>
-#include <queue>
 #include <string>
+#include <vector>
 
 
-class Client : public Socket {
-
-public:
-
-	int setup() override;
-
+class Client : public FileTransfer
+{
 
 private:
 
-	static constexpr int PORT = 5000;
-	static constexpr size_t BLOCK_SIZE = 7 * 1024;
+    std::string serverIP;
+
+    std::string filePath;
 
 
-	std::string fileName;
-	std::queue<std::vector<char>> fileQueue;
-	std::mutex queueMutex;
-	std::condition_variable queueCV;
+    Thread readerThread;
 
-	bool readingFinished = false;
+    Thread senderThread;
 
-	int connectToServer(std::string serverIP);
-	std::string getServerIP();
 
-	std::string getFileName();
-	int sendFile();
-	bool sendFileName();
-	bool sendBlock(std::vector<char>& block);
-	bool sendEndMarker();
-	bool sendAll(const char* data, int size);
+    int SendFile();
 
-	void reader();
-	void sender();
+    bool SendFileName();
+
+    bool SendBlock(
+        const std::vector<char>& block
+    );
+
+    bool SendEndMarker();
+
+
+    void Reader();
+
+    void Sender();
+
+
+    std::string GetFileName();
+
+
+public:
+
+    void SetServerIP(
+        std::string serverIP
+    );
+
+
+    void SetFilePath(
+        std::string filePath
+    );
+
+
+    int Setup() override;
+
 };

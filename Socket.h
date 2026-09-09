@@ -1,28 +1,56 @@
 #pragma once
 
 #include <iostream>
+
 #include <WinSock2.h>
 #include <WS2tcpip.h>
+
+#include <string>
 
 #pragma comment(lib, "ws2_32.lib")
 
 
-class Socket {
+class Socket
+{
 
 protected:
-	WSAData wsa{};
-	SOCKET tcpSocket = INVALID_SOCKET;
-	int prepareSocket();
-	void closeAndCleanup(SOCKET* socket1);
-	void closeAndCleanup(SOCKET* socket1, SOCKET* socket2);
-	int checkForError(int result, std::string message);
-	int checkForError(SOCKET* socket1, std::string message);
-	int checkForError(SOCKET* socket1, SOCKET* socket2, std::string message);
-	int checkForError(SOCKET* socket1, int result, std::string message);
+
+    WSAData wsa{};
+
+    SOCKET tcpSocket = INVALID_SOCKET;
+
+    static constexpr int PORT = 5000;
+
+
+    int PrepareSocket();
+
+    int Connect(std::string serverIP);
+
+    int Bind();
+
+    int Listen();
+
+    int Accept(SOCKET& clientSocket);
+
+    bool SendAll(SOCKET socket, const char* data, int size);
+
+    bool ReceiveAll(SOCKET socket,char* data,int size);
+
+    void CloseSocket(SOCKET& socket);
+
 public:
-	virtual ~Socket();
-	virtual int setup() = 0;
+
+    Socket();
+
+    virtual ~Socket();
+
+    virtual int Setup() = 0;
+
+
 private:
-	int initializeSocket();
-	int createSocket();
+
+    int InitializeSocket();
+
+    int CreateSocket();
+
 };
