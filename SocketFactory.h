@@ -1,12 +1,16 @@
 #pragma once
+
 #include "SocketType.h"
-#include "Socket.h"
-#include "Client.h"
-#include "Server.h"
+#include "FileTransfer.h"
+
+
 #include <memory>
 
 
-class SocketFactory {
-	public:
-		static std::shared_ptr<Socket> getSocket(SocketType socketType);
+class SocketFactory
+{
+
+public:
+
+    static std::shared_ptr<FileTransfer> GetSocket(SocketType socketType);
 };

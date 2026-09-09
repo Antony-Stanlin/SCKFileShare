@@ -1,351 +1,250 @@
 #include "Server.h"
+
 #include <iostream>
 #include <cstdint>
 
-int Server::setup() {
 
-	int result = prepareSocket();
-	if (result != 0)
-		return result;
+void Server::SetOutputPath(std::string outputPath){
 
-	result = bindPort();
-	if (result != 0)
-		return result;
-
-	result = listenForClient();
-	if (result != 0)
-		return result;
-
-	std::cout<< "Server started.\n";
-	std::cout<< "Waiting for client...\n";
-
-	result = acceptClient();
-	if (result != 0)
-		return result;
-	std::cout<< "Client connected successfully.\n";
-
-	setOutputPath();
-
-	result = receiveFile();
-	closeClientSocket();
-	return result;
+    this->outputPath = outputPath;
 }
 
-int Server::bindPort() {
-	sockaddr_in serverAddress{};
+int Server::Setup(){
 
-	serverAddress.sin_family = AF_INET;
-	serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-	serverAddress.sin_port = htons(PORT);
+    int result = PrepareSocket();
 
-	int result = bind(
-		tcpSocket,
-		reinterpret_cast<sockaddr*>(&serverAddress),
-		sizeof(serverAddress)
-	);
+    if (result != 0)
+        return result;
 
-	if (result == SOCKET_ERROR) {
-		std::cout<< "Bind failed. Error: "
-			<< WSAGetLastError()
-			<< "\n";
-		return 1;
-	}
-	return 0;
+    if (!File::CreateDirectory(outputPath))
+        return 1;
+
+
+    result = Bind();
+
+    if (result != 0)
+        return result;
+
+    result = Listen();
+
+    if (result != 0)
+        return result;
+
+    std::cout << "Server started.\n";
+
+    std::cout << "Waiting for client...\n";
+
+    result = Accept(clientSocket);
+
+
+    if (result != 0)
+        return result;
+
+    std::cout << "Client connected successfully.\n";
+
+    result = ReceiveFile();
+
+    CloseClientSocket();
+
+    return result;
 }
 
-int Server::listenForClient() {
-	int result = listen(
-		tcpSocket,
-		SOMAXCONN
-	);
+int Server::ReceiveFile(){
 
-	if (result == SOCKET_ERROR) {
+    if (!ReceiveFileName()){
 
-		std::cout<< "Listen failed. Error: "
-			<< WSAGetLastError()
-			<< "\n";
-		return 1;
-	}
-	return 0;
+        std::cout << "Failed to receive file name.\n";
+
+        return 1;
+    }
+
+    receiverThread.Start(&Server::Receiver, this);
+
+    writerThread.Start(&Server::Writer,this);
+
+    receiverThread.Join();
+    writerThread.Join();
+
+    return 0;
 }
 
-int Server::acceptClient() {
+bool Server::ReceiveFileName(){
 
-	sockaddr_in clientAddress{};
-	int clientAddressSize = sizeof(clientAddress);
+    uint32_t networkLength = 0;
 
-	clientSocket = accept(
-		tcpSocket,
-		reinterpret_cast<sockaddr*>(&clientAddress),
-		&clientAddressSize
-	);
+    if (!ReceiveAll(
+        clientSocket,
+        reinterpret_cast<char*>(&networkLength),
+        sizeof(networkLength)
+    ))
+    {
 
-	if (clientSocket == INVALID_SOCKET) {
-		std::cout<< "Accept failed. Error: "
-			<< WSAGetLastError()
-			<< "\n";
-		return 1;
-	}
-	return 0;
-}
+        return false;
+    }
 
-int Server::receiveFile() {
+    uint32_t nameLength = ntohl(networkLength);
 
-	if (!receiveFileName()) {
-		std::cout<< "Failed to receive file name.\n";
-		return 1;
-	}
+    if (nameLength == 0 || nameLength > 1024){
 
-	std::thread receiverThread(&Server::receiver, this);
+        std::cout << "valid file name length.\n";
 
-	std::thread writerThread(&Server::writer, this);
+        return false;
+    }
 
-	receiverThread.join();
-	writerThread.join();
+    std::vector<char> nameBuffer(nameLength);
 
-	std::cout<< "File received successfully.\n";
+    if (!ReceiveAll(
+        clientSocket,
+        nameBuffer.data(),
+        static_cast<int>(nameLength)
+    ))
+    {
+        return false;
+    }
 
-	return 0;
-}
+    fileName.assign(nameBuffer.begin(),nameBuffer.end());
 
+    outputFileName = outputPath + "\\received_" + fileName;
 
-bool Server::receiveFileName() {
-	uint32_t networkLength = 0;
+    std::cout << "Receiving file: " << outputFileName << "\n";
 
-	if (!receiveAll(reinterpret_cast<char*>(&networkLength),sizeof(networkLength)))
-		return false;
-
-	uint32_t nameLength = ntohl(networkLength);
-
-	if (nameLength == 0 || nameLength > 1024) {
-		std::cout<< "Invalid file name length.\n";
-		return false;
-	}
-
-	std::vector<char> nameBuffer(nameLength);
-
-	if (!receiveAll(nameBuffer.data(),static_cast<int>(nameLength)))
-		return false;
-
-	std::string fileName(nameBuffer.begin(),nameBuffer.end());
-
-	return true;
+    return true;
 }
 
 
-void Server::receiver() {
+bool Server::ReceiveBlock(std::vector<char>& block){
 
-	while (true) {
+    uint32_t networkSize = 0;
 
-		std::vector<char> block;
+    if (!ReceiveAll(
+        clientSocket,
+        reinterpret_cast<char*>(&networkSize),
+        sizeof(networkSize)
+    ))
+    {
 
-		if (!receiveBlock(block)) {
-			std::cout<< "Receiver: failed to receive block.\n";
+        return false;
+    }
 
-			{
-				std::lock_guard<std::mutex> lock(queueMutex);
-				receivingFinished = true;
-			}
+    uint32_t blockSize = ntohl(networkSize);
 
-			queueCV.notify_one();
-			return;
-		}
+    if (blockSize == 0){
 
-		if (block.empty())
-			break;
+        block.clear();
 
-		{
-			std::lock_guard<std::mutex> lock(queueMutex);
-			fileQueue.push(block);
-		}
+        return true;
+    }
 
-		std::cout<< "Receiver: added "
-			<< block.size()
-			<< " bytes to queue.\n";
-		queueCV.notify_one();
-	}
+    if (blockSize > BLOCK_SIZE){
 
-	receiveEndMarker();
+        std::cout << "Invalid block size: "
+            << blockSize
+            << "\n";
 
-	{
-		std::lock_guard<std::mutex> lock(queueMutex);
-		receivingFinished = true;
-	}
-	queueCV.notify_one();
+        return false;
+    }
 
-	std::cout<< "Receiver: finished receiving file.\n";
+    block.resize(blockSize);
+
+    if (!ReceiveAll(
+        clientSocket,
+        block.data(),
+        static_cast<int>(blockSize)
+    ))
+    {
+        return false;
+    }
+
+    std::cout << "Receiver: received "
+        << block.size()
+        << " bytes.\n";
+
+    return true;
 }
 
-bool Server::receiveBlock(std::vector<char>& block) {
 
-	uint32_t networkSize = 0;
+void Server::Receiver()
+{
+    while (true){
 
-	if (!receiveAll(reinterpret_cast<char*>(&networkSize),sizeof(networkSize)))
-		return false;
+        std::vector<char> block;
 
-	uint32_t blockSize = ntohl(networkSize);
+        if (!ReceiveBlock(block)){
 
-	if (blockSize == 0) {
-		block.clear();
-		return true;
-	}
+            std::cout << "Receiver: failed to receive block.\n";
 
-	if (blockSize > BLOCK_SIZE) {
+            break;
+        }
 
-		std::cout<< "Invalid block size: "
-			<< blockSize
-			<< "\n";
-		return false;
-	}
+        // Empty block means end of file
 
-	block.resize(blockSize);
+        if (block.empty())
+            break;
 
-	if (!receiveAll(block.data(),static_cast<int>(blockSize)))
-		return false;
 
-	std::cout<< "Receiver: received "
-		<< block.size()
-		<< " bytes.\n";
-	return true;
+        fileQueue.Push(block);
+
+        std::cout << "Receiver: added "
+            << block.size()
+            << " bytes to queue.\n";
+    }
+
+    fileQueue.SetFinished();
+
+    std::cout << "Receiver: finished receiving file.\n";
 }
 
-bool Server::receiveEndMarker() {
-	std::cout<< "Receiver: end marker received.\n";
-	return true;
+void Server::Writer()
+{
+
+    File file;
+
+    if (!file.OpenForWrite(outputFileName)){
+
+        fileQueue.SetFinished();
+
+        return;
+    }
+
+    std::vector<char> block;
+
+    while (fileQueue.Pop(block)){
+
+        DWORD bytesWritten = 0;
+
+        bool result = file.Write(
+                block.data(),
+                static_cast<DWORD>(block.size()),
+                bytesWritten
+            );
+
+
+        if (!result){
+            std::cout << "Writer: failed to write block.\n";
+
+            break;
+        }
+
+        if (bytesWritten != block.size()){
+
+            std::cout<< "Writer: failed to write complete block.\n";
+
+            break;
+        }
+
+        std::cout << "Writer: wrote "
+            << block.size()
+            << " bytes.\n";
+    }
+
+    file.Close();
+
+    std::cout
+        << "Writer: file writing completed.\n";
 }
 
-bool Server::receiveAll(char* data,int size) {
+void Server::CloseClientSocket()
+{
 
-	int totalReceived = 0;
-
-	while (totalReceived < size) {
-
-		int received = recv(
-			clientSocket,
-			data + totalReceived,
-			size - totalReceived,
-			0
-		);
-
-		if (received == SOCKET_ERROR) {
-
-			std::cout<< "Receive failed. Error: "
-				<< WSAGetLastError()
-				<< "\n";
-
-			return false;
-		}
-
-		if (received == 0) {
-
-			std::cout << "Client disconnected.\n";
-
-			return false;
-		}
-
-		totalReceived += received;
-	}
-
-	return true;
-}
-
-void Server::writer() {
-
-	std::ofstream file(
-		outputFileName,
-		std::ios::binary
-	);
-
-	if (!file) {
-
-		std::cout << "Writer: failed to create file.\n";
-
-		return;
-	}
-
-	while (true) {
-
-		std::vector<char> block;
-
-		{
-			std::unique_lock<std::mutex> lock(queueMutex);
-
-			queueCV.wait(
-				lock,
-				[this]() {
-
-					return !fileQueue.empty() || receivingFinished;
-				}
-			);
-
-			if (fileQueue.empty() &&
-				receivingFinished) {
-
-				break;
-			}
-
-
-			block = fileQueue.front();
-
-			fileQueue.pop();
-		}
-
-
-		queueCV.notify_one();
-
-
-		file.write(
-			block.data(),
-			static_cast<std::streamsize>(
-				block.size()
-				)
-		);
-
-
-		if (!file) {
-
-			std::cout << "Writer: failed to write block.\n";
-
-			break;
-		}
-
-
-		std::cout << "Writer: wrote "
-			<< block.size()
-			<< " bytes.\n";
-	}
-
-
-	file.close();
-
-	std::cout << "Writer: file writing completed.\n";
-}
-
-void Server::closeClientSocket() {
-
-	if (clientSocket != INVALID_SOCKET) {
-
-		closesocket(clientSocket);
-
-		clientSocket = INVALID_SOCKET;
-	}
-}
-
-void Server::setOutputPath() {
-
-	std::string path;
-	
-	std::cout << "Enter the output folder : ";
-
-	std::cin >> path;
-
-	if (!path.empty() && path.back() == '\\')
-		path.pop_back();
-
-	outputFileName = path;
-
-	std::cout << "Output file: "
-		<< outputFileName
-		<< "\n";
-
+    CloseSocket(clientSocket);
 }

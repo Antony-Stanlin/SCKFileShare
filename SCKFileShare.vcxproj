@@ -140,6 +140,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Client.cpp" />
+    <ClCompile Include="File.cpp" />
+    <ClCompile Include="FileTransfer.cpp" />
+    <ClCompile Include="Queue.cpp" />
     <ClCompile Include="SCKFileShare.cpp" />
     <ClCompile Include="Server.cpp" />
     <ClCompile Include="SocketFactory.cpp" />
@@ -148,9 +151,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Client.h" />
+    <ClInclude Include="File.h" />
+    <ClInclude Include="FileTransfer.h" />
+    <ClInclude Include="Queue.h" />
     <ClInclude Include="Server.h" />
     <ClInclude Include="Socket.h" />
     <ClInclude Include="SocketFactory.h" />
+    <ClInclude Include="Thread.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
